@@ -173,7 +173,7 @@ app.get("/invite/:code", async (c) => {
     where: { inviteCode: code },
     include: {
       _count: { select: { members: true } },
-      creator: { select: { name: true, email: true } },
+      creator: { select: { name: true } },
     },
   });
 
@@ -197,7 +197,7 @@ app.get("/invite/:code", async (c) => {
       type: board.type,
       memberCount: board._count.members,
       inviteCode: board.inviteCode,
-      creatorName: board.creator.name || board.creator.email || "Someone",
+      creatorName: board.creator.name || "Someone",
     },
   });
 });

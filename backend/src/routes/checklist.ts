@@ -117,10 +117,14 @@ app.post(
     let resolvedDescription = description ?? null;
     if (suggestionId) {
       const suggestion = await prisma.suggestion.findUnique({ where: { id: suggestionId } });
-      if (suggestion) {
-        if (resolvedLink === null && suggestion.url) resolvedLink = suggestion.url;
-        if (resolvedDescription === null && suggestion.description) resolvedDescription = suggestion.description;
+      if (!suggestion || suggestion.boardId !== boardId) {
+        return c.json(
+          { error: { message: "Suggestion does not belong to this board", code: "INVALID_SUGGESTION" } },
+          400
+        );
       }
+      if (resolvedLink === null && suggestion.url) resolvedLink = suggestion.url;
+      if (resolvedDescription === null && suggestion.description) resolvedDescription = suggestion.description;
     }
 
     // Apply Skimlinks affiliate conversion

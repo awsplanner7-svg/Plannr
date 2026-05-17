@@ -280,6 +280,20 @@ app.post(
     const member = await isBoardMember(day.boardId, user.id);
     if (!member) return c.json({ error: { message: "Forbidden", code: "FORBIDDEN" } }, 403);
 
+    // Verify every item in the reorder list belongs to this day
+    if (itemIds.length > 0) {
+      const items = await prisma.itineraryItem.findMany({
+        where: { id: { in: itemIds } },
+        select: { id: true, dayId: true },
+      });
+      if (items.length !== itemIds.length || items.some((i) => i.dayId !== dayId)) {
+        return c.json(
+          { error: { message: "All items must belong to this day", code: "INVALID_ITEMS" } },
+          400
+        );
+      }
+    }
+
     // Update order for each item
     await Promise.all(
       itemIds.map((id, index) =>

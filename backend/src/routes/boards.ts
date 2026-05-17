@@ -213,4 +213,89 @@ app.delete("/:id", async (c) => {
   return c.body(null, 204);
 });
 
+// POST /api/boards/:id/leave — current user leaves a board
+app.post("/:id/leave", async (c) => {
+  const user = c.get("user");
+  if (!user) return c.json({ error: { message: "Unauthorized", code: "UNAUTHORIZED" } }, 401);
+
+  const boardId = c.req.param("id");
+
+  const board = await prisma.board.findUnique({ where: { id: boardId } });
+  if (!board) return c.json({ error: { message: "Not found", code: "NOT_FOUND" } }, 404);
+
+  if (board.creatorId === user.id) {
+    return c.json(
+      { error: { message: "The board creator cannot leave their own board. Delete the board instead.", code: "CREATOR_CANNOT_LEAVE" } },
+      400
+    );
+  }
+
+  const membership = await prisma.boardMember.findUnique({
+    where: { boardId_userId: { boardId, userId: user.id } },
+  });
+  if (!membership) return c.json({ error: { message: "Not found", code: "NOT_FOUND" } }, 404);
+
+  await prisma.boardMember.delete({
+    where: { boardId_userId: { boardId, userId: user.id } },
+  });
+
+  return c.body(null, 204);
+});
+
+// DELETE /api/boards/:id/members/:userId — creator removes a member
+app.delete("/:id/members/:userId", async (c) => {
+  const user = c.get("user");
+  if (!user) return c.json({ error: { message: "Unauthorized", code: "UNAUTHORIZED" } }, 401);
+
+  const boardId = c.req.param("id");
+  const targetUserId = c.req.param("userId");
+
+  const board = await prisma.board.findUnique({ where: { id: boardId } });
+  if (!board) return c.json({ error: { message: "Not found", code: "NOT_FOUND" } }, 404);
+  if (board.creatorId !== user.id) {
+    return c.json({ error: { message: "Only the board creator can remove members", code: "FORBIDDEN" } }, 403);
+  }
+
+  if (targetUserId === user.id) {
+    return c.json(
+      { error: { message: "Creator cannot remove themselves. Use leave board or delete board instead.", code: "CREATOR_CANNOT_REMOVE_SELF" } },
+      400
+    );
+  }
+
+  const membership = await prisma.boardMember.findUnique({
+    where: { boardId_userId: { boardId, userId: targetUserId } },
+  });
+  if (!membership) return c.json({ error: { message: "Member not found", code: "NOT_FOUND" } }, 404);
+
+  await prisma.boardMember.delete({
+    where: { boardId_userId: { boardId, userId: targetUserId } },
+  });
+
+  return c.body(null, 204);
+});
+
+// POST /api/boards/:id/rotate-invite — creator rotates the invite code
+app.post("/:id/rotate-invite", async (c) => {
+  const user = c.get("user");
+  if (!user) return c.json({ error: { message: "Unauthorized", code: "UNAUTHORIZED" } }, 401);
+
+  const boardId = c.req.param("id");
+
+  const board = await prisma.board.findUnique({ where: { id: boardId } });
+  if (!board) return c.json({ error: { message: "Not found", code: "NOT_FOUND" } }, 404);
+  if (board.creatorId !== user.id) {
+    return c.json({ error: { message: "Only the board creator can rotate the invite code", code: "FORBIDDEN" } }, 403);
+  }
+
+  const newCode = crypto.randomUUID();
+
+  const updated = await prisma.board.update({
+    where: { id: boardId },
+    data: { inviteCode: newCode },
+  });
+
+  return c.json({ data: { inviteCode: updated.inviteCode } });
+});
+
 export default app;
