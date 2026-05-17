@@ -2,7 +2,7 @@
   Expo SDK 54, React Native 0.81.5, React 19.1, bun (not npm).
   React Query for server/async state.
   NativeWind + Tailwind v3 for styling.
-  react-native-reanimated v3 (pinned to ~3.19.0 via overrides — NativeWind does not yet support Reanimated v4; do not bump to v4).
+  react-native-reanimated v4 (^4.1.1, matches SDK 54's bundledNativeModules). NativeWind 4.1.23 has no Reanimated peer constraint, so v4 is fine.
   react-native-gesture-handler for gestures.
   lucide-react-native for icons.
   All packages are pre-installed. DO NOT install new packages unless they are @expo-google-font packages or pure JavaScript helpers like lodash, dayjs, etc.
@@ -35,6 +35,9 @@
 
 <forbidden_files>
   Do not edit: patches/, babel.config.js, metro.config.js, app.json, tsconfig.json, nativewind-env.d.ts
+
+  Documented exceptions (edits explicitly allowed for these reasons):
+  - babel.config.js: the Reanimated 4 plugin is `"react-native-worklets/plugin"` (not `"react-native-reanimated/plugin"`). If a future Reanimated/worklets major version moves the plugin again, that swap is allowed too. Any other change to babel.config.js still needs explicit approval.
 </forbidden_files>
 
 <startup_triage>
