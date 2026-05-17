@@ -1,0 +1,174 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id             String          @id
+  name           String
+  email          String          @unique
+  emailVerified  Boolean         @default(false)
+  image          String?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  sessions       Session[]
+  accounts       Account[]
+  boards         Board[]
+  memberships    BoardMember[]
+  suggestions    Suggestion[]
+  votes          Vote[]
+  checklistItems ChecklistItem[] @relation("ChecklistCreator")
+  assignedItems  ChecklistItem[] @relation("ChecklistAssignee")
+  itineraryItems ItineraryItem[] @relation("ItineraryCreator")
+  editedItems    ItineraryItem[] @relation("ItineraryEditor")
+}
+
+model Session {
+  id        String   @id
+  expiresAt DateTime
+  token     String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  ipAddress String?
+  userAgent String?
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Account {
+  id                    String    @id
+  accountId             String
+  providerId            String
+  userId                String
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+}
+
+model Verification {
+  id         String   @id
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model Board {
+  id            String          @id @default(cuid())
+  name          String
+  type          String
+  eventDate     String?
+  inviteCode    String          @unique @default(cuid())
+  creatorId     String
+  creator       User            @relation(fields: [creatorId], references: [id])
+  suggestions   Suggestion[]
+  members       BoardMember[]
+  checklist     ChecklistItem[]
+  itineraryDays ItineraryDay[]
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+}
+
+model BoardMember {
+  id        String   @id @default(cuid())
+  boardId   String
+  userId    String
+  role      String   @default("member")
+  board     Board    @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([boardId, userId])
+}
+
+model Suggestion {
+  id          String   @id @default(cuid())
+  boardId     String
+  authorId    String
+  title       String
+  url         String?
+  description String?
+  imageUrl    String?
+  type        String   @default("product")
+  status      String   @default("pending")
+  board       Board    @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  author      User     @relation(fields: [authorId], references: [id])
+  votes       Vote[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Vote {
+  id           String     @id @default(cuid())
+  suggestionId String
+  userId       String
+  suggestion   Suggestion @relation(fields: [suggestionId], references: [id], onDelete: Cascade)
+  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt    DateTime   @default(now())
+
+  @@unique([suggestionId, userId])
+}
+
+model ChecklistItem {
+  id           String   @id @default(cuid())
+  boardId      String
+  board        Board    @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  title        String
+  link         String?
+  description  String?
+  assigneeId   String?
+  assignee     User?    @relation("ChecklistAssignee", fields: [assigneeId], references: [id])
+  category     String   @default("other")
+  status       String   @default("todo")
+  completed    Boolean  @default(false)
+  suggestionId String?
+  createdById  String
+  createdBy    User     @relation("ChecklistCreator", fields: [createdById], references: [id])
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model ItineraryDay {
+  id        String          @id @default(cuid())
+  boardId   String
+  board     Board           @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  date      String?
+  label     String?
+  dayNumber Int
+  items     ItineraryItem[]
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+}
+
+model ItineraryItem {
+  id             String       @id @default(cuid())
+  dayId          String
+  day            ItineraryDay @relation(fields: [dayId], references: [id], onDelete: Cascade)
+  boardId        String
+  time           String?
+  title          String
+  description    String?
+  link           String?
+  location       String?
+  category       String       @default("other")
+  order          Int          @default(0)
+  suggestionId   String?
+  lastEditedById String?
+  lastEditedBy   User?        @relation("ItineraryEditor", fields: [lastEditedById], references: [id])
+  createdById    String
+  createdBy      User         @relation("ItineraryCreator", fields: [createdById], references: [id])
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+}
