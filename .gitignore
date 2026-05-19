@@ -1,0 +1,13 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Editor stuff
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS metadata
+Thumbs.db

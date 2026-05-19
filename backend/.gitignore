@@ -36,3 +36,13 @@ studio.log
 
 # Prisma generated files (bunx prisma generate)
 /generated/prisma
+# SQLite database files (local development only)
+*.db
+*.db-shm
+*.db-wal
+*.db-journal
+
+# All .env files (machine-specific, never commit)
+.env
+.env.*
+!.env.example
