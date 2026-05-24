@@ -1,17 +1,19 @@
 {
   "expo": {
-    "name": "vibecode",
-    "slug": "vibecode",
+    "name": "Plannr",
+    "slug": "plannr",
     "scheme": "vibecode",
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "app.joinplannr.plannr"
     },
     "android": {
-      "edgeToEdgeEnabled": true
+      "edgeToEdgeEnabled": true,
+      "package": "app.joinplannr.plannr"
     },
     "plugins": [
       "expo-router",
@@ -27,6 +29,13 @@
     ],
     "experiments": {
       "typedRoutes": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "169c416e-4450-4b69-bbdb-6f5117a8e32e"
+      }
+    },
+    "owner": "plannr"
   }
 }
