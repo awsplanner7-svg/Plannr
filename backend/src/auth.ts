@@ -17,6 +17,12 @@ export const auth = betterAuth({
       enabled: true,
     },
   },
+  session: {
+    // Skip the "fresh session" check on sensitive endpoints (e.g. delete-user).
+    // Lets users delete their account without re-entering their password, even
+    // hours/days after sign-in. Acceptable for our small group-trip use case.
+    freshAge: 0,
+  },
   trustedOrigins: [
     "vibecode://*/*",
     "exp://*/*",
