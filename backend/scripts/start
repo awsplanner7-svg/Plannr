@@ -6,8 +6,9 @@ set -o pipefail
 # Load shared environment setup
 source "$(dirname "$0")/env.sh"
 
-# Backup the database before proceeding.
-if [[ "${ENVIRONMENT}" == "production" ]] && [[ -f "${DATABASE_FILE}" ]]; then
+# Backup the SQLite database before proceeding (no-op on Postgres / Railway,
+# where DATABASE_FILE is never set because Railway injects DATABASE_URL).
+if [[ "${ENVIRONMENT}" == "production" ]] && [[ -f "${DATABASE_FILE:-}" ]]; then
   DATABASE_BACKUP_FILE="${DATABASE_FILE}-$(date +%s)"
   echo "VACUUM INTO '${DATABASE_BACKUP_FILE}'" | sqlite3 "${DATABASE_FILE}"
 fi
