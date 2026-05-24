@@ -3,7 +3,10 @@
 
 const { getDefaultConfig } = require("expo/metro-config");
 const { withNativeWind } = require("nativewind/metro");
-const { withVibecodeMetro } = require("@vibecodeapp/sdk/metro");
+// withVibecodeMetro removed: it injects a `.web.js` fetch polyfill into the
+// boot sequence for ALL platforms (including iOS), which Hermes can't run and
+// is the most likely cause of the wrapNativeSuper startup crash on dev builds.
+// Web polyfills and SVG transformer it provides aren't used by mobile/src/.
 const path = require("path");
 const fs = require("fs");
 
@@ -126,4 +129,4 @@ config.resolver = {
 };
 
 // Integrate NativeWind with the Metro configuration.
-module.exports = withNativeWind(withVibecodeMetro(config), { input: "./global.css" });
+module.exports = withNativeWind(config, { input: "./global.css" });
