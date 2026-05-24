@@ -1,5 +1,78 @@
 # Plannr — Session Notes
 
+## 2026-05-24 — Gate 1: Backend deployed to Railway with Postgres
+
+### What we did
+
+Apple Developer approval landed. Followed Gate 1 of `SHIP-TO-PHONE-BRIEFING.md`: move the backend off Anthony's Mac and onto the public internet.
+
+**Live backend URL:** `https://plannr-production-9a90.up.railway.app`
+**Project name in Railway:** auto-generated cute name (currently "chic-kindness"). Renameable later.
+
+### Code changes (committed and pushed to `main`)
+
+Four commits, in order:
+
+1. **`058652f`** — Add `SHIP-TO-PHONE-BRIEFING.md` to the repo so future sessions can read it.
+2. **`e0b1efd`** — Prep backend for Railway + Postgres:
+   - `backend/prisma/schema.prisma`: provider `sqlite` → `postgresql`
+   - `backend/scripts/env.sh`: only fall back to SQLite/DATA_DIR path when DATABASE_URL is not externally provided (Railway's Postgres plugin injects it). Vibecode dev container behavior unchanged.
+   - `backend/scripts/start`: guard `${DATABASE_FILE}` → `${DATABASE_FILE:-}` so the SQLite-only backup step is a no-op on Postgres instead of crashing under `set -o nounset`.
+3. **`a97fc0b`** — `backend/src/prisma.ts`: guard `initSqlitePragmas` behind `DATABASE_URL?.startsWith("file:")`. PRAGMA commands are SQLite-only and crash the boot path on Postgres with "syntax error at or near PRAGMA".
+4. **`e127535`** — `backend/src/auth.ts`: Better Auth `prismaAdapter` provider `sqlite` → `postgresql`. The adapter's provider hint controls SQL dialect generation independently of Prisma's own provider; without it, sign-up returned 500.
+
+### Railway configuration
+
+Settings the user manually set in Railway (NOT in code, NOT in repo):
+- **Source → Root Directory:** `backend`
+- **Deploy → Custom Start Command:** `bash scripts/start`
+- **Networking → Generated Domain:** `plannr-production-9a90.up.railway.app` on port 8080
+- **Postgres database service** added to project (Railway auto-injects `DATABASE_URL` via `${{Postgres.DATABASE_URL}}` reference)
+
+**Service variables set in Railway (Variables tab on Plannr service):**
+
+| Variable | Value |
+|---|---|
+| `BACKEND_URL` | `https://plannr-production-9a90.up.railway.app` |
+| `BETTER_AUTH_SECRET` | (32-byte hex, saved in Anthony's password manager — DO NOT regenerate unless intending to log everyone out) |
+| `DATABASE_URL` | `${{Postgres.DATABASE_URL}}` (Railway interpolation, points at the Postgres service) |
+| `ENVIRONMENT` | `production` (originally was lowercase `environment` — that defaulted to dev mode silently because env vars are case-sensitive) |
+
+### End-to-end verification
+
+- `GET /health` → 200 `{"status":"ok"}`
+- `GET /api/boards` (no auth) → 401 (proves auth middleware mounted)
+- `POST /api/auth/sign-up/email` → 200 with user + session token + secure HttpOnly cookie
+
+### Whack-a-mole crashes worked through (in order)
+
+1. Build failed before Root Directory set → set Root Directory to `backend`
+2. Build OK, runtime crash: Prisma got SQLite URL with postgresql provider → added Postgres service + `DATABASE_URL` variable
+3. Build OK, runtime crash: `ERROR: syntax error at or near "PRAGMA"` → guarded `initSqlitePragmas` (commit `a97fc0b`)
+4. Build OK, runtime: signup 500'd with `P2021: table "public.User" does not exist` → root cause was Custom Start Command field was *empty* (default `bun run src/index.ts` was running, skipping our `prisma db push`). Setting it to `bash scripts/start` fixed it AND also exposed the Better Auth adapter bug (commit `e127535`).
+5. Server running in "dev mode with hot reload" in production → user had set `environment` (lowercase) instead of `ENVIRONMENT`. Renamed.
+
+### Worth knowing / gotchas
+
+- **`@vibecodeapp/proxy`** (the "DO NOT REMOVE" import at the top of `src/index.ts`) works fine on Railway. It initializes with "no project ID set" and loads 35 proxied domains. No-op enough to not crash the boot. This was the biggest unknown going in — turned out to be a non-issue.
+- **The `8 variables added by Railway`** shown in the Variables tab include the Railway-internal stuff (PORT, RAILWAY_*). Don't touch them.
+- **`backend/.env.production`** in the repo is unused on Railway — Railway reads from its own Variables tab, not the file. The file is a stale Vibecode-era artifact.
+- **No migrations directory** exists — we're using `prisma db push --accept-data-loss` every deploy. Fine while we have no real users; switch to `prisma migrate dev` + `prisma migrate deploy` before inviting family.
+
+### What's NEXT
+
+Gate 1 is done. Remaining gates from `SHIP-TO-PHONE-BRIEFING.md`:
+
+- **Gate 2 — Point the mobile app at the Railway backend.** Set `EXPO_PUBLIC_BACKEND_URL` in `mobile/.env.production` (or equivalent) to `https://plannr-production-9a90.up.railway.app`. Confirm no `localhost`/LAN IP hardcoded anywhere. Estimated 15-30 min.
+- **Gate 3 — Apple blockers.** Delete-account flow (Profile → Settings → Delete Account) and Leave/Remove/Rotate UI (backend already done in commit `0505682`). Estimated 60-90 min combined.
+- **Gate 4 — EAS Build → TestFlight.** Budget 3-4 hours. Real native build, not Expo Go.
+
+### How to resume next session
+
+1. Confirm the backend is still up: `curl https://plannr-production-9a90.up.railway.app/health` should return `{"status":"ok"}`. If it's down: open Railway dashboard, check Plannr service logs.
+2. Start Gate 2: look at `mobile/.env`, `mobile/.env.production`, and any hardcoded backend references in `mobile/src/`. Update to point at the Railway URL.
+3. The smoke-test users from today (`railway-smoketest-*@plannr.test`, `smoke-prod-*@plannr.test`) are sitting in the production Postgres. Harmless. Either ignore or wipe via Railway's data viewer once you have a real way to inspect/delete.
+
 ## 2026-05-17 — Privacy audit and fixes
 
 ### What we did
