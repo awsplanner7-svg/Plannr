@@ -72,7 +72,7 @@ model Board {
   eventDate     String?
   inviteCode    String          @unique @default(cuid())
   creatorId     String
-  creator       User            @relation(fields: [creatorId], references: [id])
+  creator       User            @relation(fields: [creatorId], references: [id], onDelete: Cascade)
   suggestions   Suggestion[]
   members       BoardMember[]
   checklist     ChecklistItem[]
@@ -104,7 +104,7 @@ model Suggestion {
   type        String   @default("product")
   status      String   @default("pending")
   board       Board    @relation(fields: [boardId], references: [id], onDelete: Cascade)
-  author      User     @relation(fields: [authorId], references: [id])
+  author      User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
   votes       Vote[]
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -129,13 +129,13 @@ model ChecklistItem {
   link         String?
   description  String?
   assigneeId   String?
-  assignee     User?    @relation("ChecklistAssignee", fields: [assigneeId], references: [id])
+  assignee     User?    @relation("ChecklistAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
   category     String   @default("other")
   status       String   @default("todo")
   completed    Boolean  @default(false)
   suggestionId String?
   createdById  String
-  createdBy    User     @relation("ChecklistCreator", fields: [createdById], references: [id])
+  createdBy    User     @relation("ChecklistCreator", fields: [createdById], references: [id], onDelete: Cascade)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 }
@@ -166,9 +166,9 @@ model ItineraryItem {
   order          Int          @default(0)
   suggestionId   String?
   lastEditedById String?
-  lastEditedBy   User?        @relation("ItineraryEditor", fields: [lastEditedById], references: [id])
+  lastEditedBy   User?        @relation("ItineraryEditor", fields: [lastEditedById], references: [id], onDelete: SetNull)
   createdById    String
-  createdBy      User         @relation("ItineraryCreator", fields: [createdById], references: [id])
+  createdBy      User         @relation("ItineraryCreator", fields: [createdById], references: [id], onDelete: Cascade)
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 }
