@@ -70,8 +70,77 @@ Gate 1 is done. Remaining gates from `SHIP-TO-PHONE-BRIEFING.md`:
 ### How to resume next session
 
 1. Confirm the backend is still up: `curl https://plannr-production-9a90.up.railway.app/health` should return `{"status":"ok"}`. If it's down: open Railway dashboard, check Plannr service logs.
-2. Start Gate 2: look at `mobile/.env`, `mobile/.env.production`, and any hardcoded backend references in `mobile/src/`. Update to point at the Railway URL.
-3. The smoke-test users from today (`railway-smoketest-*@plannr.test`, `smoke-prod-*@plannr.test`) are sitting in the production Postgres. Harmless. Either ignore or wipe via Railway's data viewer once you have a real way to inspect/delete.
+2. Smoke-test users from today (`railway-smoketest-*@plannr.test`, `smoke-prod-*@plannr.test`, `delete-test-*`, `cascade-*`, `verify-*`) are in the production Postgres. Harmless. Either ignore or wipe via Railway's data viewer.
+
+---
+
+## 2026-05-24 (continued) — Gates 2, 3A, and 3B in the same session
+
+### What got done after Gate 1
+
+**Gate 2 — mobile prod env points at Railway** (commit `11af05b`)
+- `mobile/.env.production`: swapped all three Vibecode URL references (`BACKEND_URL`, `EXPO_PUBLIC_BACKEND_URL`, `EXPO_PUBLIC_VIBECODE_BACKEND_URL`) to `https://plannr-production-9a90.up.railway.app`.
+- Only `EXPO_PUBLIC_BACKEND_URL` is actually referenced in code (verified via grep). The other two are stale Vibecode template artifacts kept consistent for safety.
+- `mobile/.env` (dev) still points at LAN IP `192.168.1.38:3000` — kept for local dev iteration.
+- **Not actually exercised until Gate 4** when EAS builds an app that uses these vars.
+
+**Gate 3A — Delete Account flow (Apple blocker)** — three commits
+1. `04a1032` — schema cascade semantics: added `onDelete: Cascade` to `Board.creator`, `Suggestion.author`, `ChecklistItem.createdBy`, `ItineraryItem.createdBy`. Added `onDelete: SetNull` to `ChecklistItem.assignee` and `ItineraryItem.lastEditedBy`. Enabled Better Auth's built-in `user.deleteUser.enabled: true`. Exposed at `POST /api/auth/delete-user`.
+2. `d5d61a0` — `session.freshAge: 0` so the mobile UI can delete without a password prompt regardless of how long ago the user signed in. Acceptable tradeoff for our scale.
+3. `8072842` — `mobile/src/app/(app)/profile.tsx`: red Delete Account button below Sign out → confirmation modal → `authClient.deleteUser()` → `invalidateSession()` → root layout routes to login.
+
+End-to-end cascade verified via curl: create user + board → delete user → returns 200 (no FK error) → second user can't fetch board (404). The 200 itself is proof the cascade fired — without it, Prisma would have errored on the foreign key.
+
+**Gate 3B — Leave / Remove member / Rotate invite UI** (commit `867cbaa`)
+- Backend routes already existed (commit `0505682`). Pure mobile UI work.
+- Made the `{N} members` text in the board meta row tappable (purple color). Opens a bottom-sheet Members modal.
+- Members modal shows each member with name + role badge ("Creator" for the board creator). Three actions wired up:
+  - **Rotate invite code** (creator-only, top of sheet) — confirmation → `POST /api/boards/:id/rotate-invite` → invalidates `["board", id]` cache → toast.
+  - **Remove member** (creator-only, per non-creator-non-self row) — confirmation → `DELETE /api/boards/:id/members/:userId` → cache invalidation.
+  - **Leave board** (non-creator-only, bottom of sheet) — confirmation → `POST /api/boards/:id/leave` → routes to boards list.
+- All mutations surface errors via the existing `showToast(msg)` callback.
+- No edits to existing logic in the 4400-line `board/[id].tsx`. Pure additions in localized chunks.
+
+### What's NEXT
+
+**Gate 4 only** remains: EAS Build → TestFlight on Anthony's phone.
+
+- Open Claude Code with a clear runway (3-4 hours).
+- Need: `cd mobile && bunx eas build:configure` (one-time), set up Apple App-specific password for EAS, then `bunx eas build --profile development --platform ios`.
+- The Expo SDK 54 / RN 0.81 boot crash in Expo Go is *expected to disappear* in a real dev build (per `2026-05-17` notes). If it persists, the dev build will at least surface a real native stack to read.
+- Then the install-on-phone step (TestFlight after the build uploads).
+- End-to-end test: open Plannr on iPhone, sign up fresh, create a board, invite by sharing the link, verify it works against the live Railway backend.
+
+### Things to verify before Gate 4
+
+These aren't bugs — they're items where a sanity check before EAS builds saves a re-build cycle:
+
+1. **Run the mobile app once locally pointed at Railway.** Set `EXPO_PUBLIC_BACKEND_URL` in `mobile/.env` to the Railway URL temporarily, start the app on a simulator, verify sign-up / create board / invite UI all still work. (The signup test you ran via curl proves the backend; this proves the full mobile→Railway path.)
+2. **Smoke-test the new Profile → Delete Account button** in the simulator before committing it to a TestFlight build. Sign up a fresh user, tap Delete Account, confirm the user is gone (try to sign in again, should fail).
+3. **Smoke-test the Members modal** — tap "N members" on a board, open and close, try the Leave/Remove/Rotate flows. Easiest to do with two test accounts.
+4. **Better Auth `trustedOrigins` does NOT include any iOS app scheme yet.** Current list (in `backend/src/auth.ts`): `vibecode://*/*`, `exp://*/*`, localhost, Vibecode domains. Once Plannr has a real bundle ID (e.g. `app.joinplannr` → scheme `app.joinplannr://`), we may need to add that. Test from the dev build first — bearer-token auth may make this a non-issue.
+
+### Open items still deferred (from earlier sessions, NOT today)
+
+- **M2** — invite codes never auto-expire (rotation is now manual via UI as of today, so this is less urgent)
+- **M3** — no rate limiting on batch email invites
+- **M4** — board members see each others' emails (members modal now exposes this UX-wise; before, only via API response)
+- **Low** — inconsistent delete permissions (checklist creator-only, itinerary any-member), no DELETE for suggestions, board PATCH ignores `eventDate`
+- **Activity feed rebuild** — planned, still paused
+- **Dev/prod schema divergence** — local backend dev now broken because `schema.prisma` says `postgresql` but Anthony's local DB is SQLite. Either: (a) install Postgres locally, (b) point local dev at the Railway database temporarily, (c) keep a separate `schema.dev.prisma`. Doesn't block Gate 4. Worth solving before doing more backend work.
+
+### Today's commit log
+
+1. `058652f` — Add SHIP-TO-PHONE-BRIEFING.md
+2. `e0b1efd` — Prep backend for Railway + Postgres (schema, env.sh, start)
+3. `a97fc0b` — Guard SQLite PRAGMA init on Postgres
+4. `e127535` — Better Auth Prisma adapter sqlite → postgresql
+5. `297a2eb` — SESSION-NOTES Gate 1 done
+6. `11af05b` — Gate 2: mobile .env.production → Railway
+7. `04a1032` — Gate 3A: enable account deletion with cascade semantics
+8. `d5d61a0` — Skip session-freshness on delete-user
+9. `8072842` — Gate 3A: Delete Account UI on Profile screen
+10. `867cbaa` — Gate 3B: Members modal with leave / remove / rotate
 
 ## 2026-05-17 — Privacy audit and fixes
 
