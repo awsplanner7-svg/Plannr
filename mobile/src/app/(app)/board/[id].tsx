@@ -1684,6 +1684,10 @@ export default function BoardDetailScreen() {
   const [showEditType, setShowEditType] = useState<boolean>(false);
   const [editNameValue, setEditNameValue] = useState<string>("");
   const [editTypeValue, setEditTypeValue] = useState<string>("");
+  const [showMembersModal, setShowMembersModal] = useState<boolean>(false);
+  const [memberPendingRemoval, setMemberPendingRemoval] = useState<{ userId: string; name: string } | null>(null);
+  const [showLeaveConfirm, setShowLeaveConfirm] = useState<boolean>(false);
+  const [showRotateConfirm, setShowRotateConfirm] = useState<boolean>(false);
   const sendEmailInvites = useSendEmailInvites();
 
   const showToast = useCallback((message?: string) => {
@@ -1786,6 +1790,45 @@ export default function BoardDetailScreen() {
     },
   });
 
+  const leaveBoardMutation = useMutation({
+    mutationFn: () => api.post<void>(`/api/boards/${id}/leave`, {}),
+    onSuccess: () => {
+      setShowLeaveConfirm(false);
+      setShowMembersModal(false);
+      router.replace("/(app)" as any);
+      queryClient.invalidateQueries({ queryKey: ["boards"] });
+    },
+    onError: (err: any) => {
+      setShowLeaveConfirm(false);
+      showToast(err?.message ?? "Couldn't leave board");
+    },
+  });
+
+  const removeMemberMutation = useMutation({
+    mutationFn: (userId: string) => api.delete(`/api/boards/${id}/members/${userId}`),
+    onSuccess: () => {
+      setMemberPendingRemoval(null);
+      queryClient.invalidateQueries({ queryKey: ["board", id] });
+    },
+    onError: (err: any) => {
+      setMemberPendingRemoval(null);
+      showToast(err?.message ?? "Couldn't remove member");
+    },
+  });
+
+  const rotateInviteMutation = useMutation({
+    mutationFn: () => api.post<{ inviteCode: string }>(`/api/boards/${id}/rotate-invite`, {}),
+    onSuccess: () => {
+      setShowRotateConfirm(false);
+      queryClient.invalidateQueries({ queryKey: ["board", id] });
+      showToast("Invite code rotated. Old link no longer works.");
+    },
+    onError: (err: any) => {
+      setShowRotateConfirm(false);
+      showToast(err?.message ?? "Couldn't rotate invite code");
+    },
+  });
+
   if (isError) {
     return (
       <SafeAreaView style={styles.container}>
@@ -1868,7 +1911,17 @@ export default function BoardDetailScreen() {
 
       {/* BOARD META */}
       <View style={styles.boardMeta}>
-        <Text style={styles.metaText}>{board.members.length} {board.members.length === 1 ? "member" : "members"}</Text>
+        <Pressable
+          onPress={() => setShowMembersModal(true)}
+          hitSlop={6}
+          testID="members-meta-btn"
+        >
+          {({ pressed }) => (
+            <Text style={[styles.metaText, styles.metaTextTappable, pressed && { opacity: 0.5 }]}>
+              {board.members.length} {board.members.length === 1 ? "member" : "members"}
+            </Text>
+          )}
+        </Pressable>
         <View style={styles.metaDot} />
         <Text style={styles.metaText}>{board.suggestions.length} suggestions</Text>
         <View style={styles.metaDot} />
@@ -2472,6 +2525,203 @@ export default function BoardDetailScreen() {
               >
                 <Text style={styles.deleteConfirmText}>
                   {updateBoardMutation.isPending ? "Saving\u2026" : "Save"}
+                </Text>
+              </Pressable>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* Members Modal */}
+      <Modal
+        visible={showMembersModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowMembersModal(false)}
+      >
+        <Pressable style={styles.settingsOverlay} onPress={() => setShowMembersModal(false)}>
+          <Pressable style={styles.membersSheet} onPress={() => {}}>
+            <View style={styles.membersHeader}>
+              <Text style={styles.membersTitle}>Members</Text>
+              <Pressable
+                onPress={() => setShowMembersModal(false)}
+                hitSlop={10}
+                testID="members-close-btn"
+              >
+                <Text style={styles.membersDoneText}>Done</Text>
+              </Pressable>
+            </View>
+
+            {isCreator ? (
+              <Pressable
+                style={({ pressed }) => [styles.rotateInviteRow, pressed && { opacity: 0.7 }]}
+                onPress={() => setShowRotateConfirm(true)}
+                testID="rotate-invite-btn"
+              >
+                <View style={styles.rotateInviteIcon}>
+                  <Ionicons name="refresh" size={18} color="#534AB7" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.rotateInviteTitle}>Rotate invite code</Text>
+                  <Text style={styles.rotateInviteSubtitle}>Invalidates the current invite link</Text>
+                </View>
+              </Pressable>
+            ) : null}
+
+            <ScrollView style={{ maxHeight: 380 }}>
+              {board.members.map((m) => {
+                const isMe = m.userId === session?.user?.id;
+                const isMemberCreator = m.userId === board.creatorId;
+                const canRemove = isCreator && !isMemberCreator && !isMe;
+                return (
+                  <View key={m.id} style={styles.memberRow} testID={`member-row-${m.userId}`}>
+                    <Avatar name={m.user.name} size={36} />
+                    <View style={{ flex: 1, marginLeft: 12 }}>
+                      <Text style={styles.memberName}>
+                        {m.user.name}
+                        {isMe ? " (You)" : ""}
+                      </Text>
+                      {isMemberCreator ? (
+                        <Text style={styles.memberRoleBadge}>Creator</Text>
+                      ) : null}
+                    </View>
+                    {canRemove ? (
+                      <Pressable
+                        style={({ pressed }) => [styles.memberRemoveBtn, pressed && { opacity: 0.7 }]}
+                        onPress={() => setMemberPendingRemoval({ userId: m.userId, name: m.user.name })}
+                        testID={`member-remove-btn-${m.userId}`}
+                      >
+                        <Text style={styles.memberRemoveText}>Remove</Text>
+                      </Pressable>
+                    ) : null}
+                  </View>
+                );
+              })}
+            </ScrollView>
+
+            {!isCreator ? (
+              <Pressable
+                style={({ pressed }) => [styles.leaveBoardBtn, pressed && { opacity: 0.8 }]}
+                onPress={() => setShowLeaveConfirm(true)}
+                testID="leave-board-btn"
+              >
+                <Text style={styles.leaveBoardText}>Leave board</Text>
+              </Pressable>
+            ) : null}
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* Rotate Invite Confirm Modal */}
+      <Modal
+        visible={showRotateConfirm}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowRotateConfirm(false)}
+      >
+        <Pressable style={styles.settingsOverlay} onPress={() => setShowRotateConfirm(false)}>
+          <Pressable style={styles.deleteConfirmCard} onPress={() => {}}>
+            <Text style={styles.deleteConfirmTitle}>Rotate invite code?</Text>
+            <Text style={styles.deleteConfirmBody}>
+              The current invite link will stop working immediately. You'll need to share the new link with anyone you still want to invite.
+            </Text>
+            <View style={styles.deleteConfirmActions}>
+              <Pressable
+                style={styles.deleteCancelBtn}
+                onPress={() => setShowRotateConfirm(false)}
+                disabled={rotateInviteMutation.isPending}
+                testID="rotate-invite-cancel"
+              >
+                <Text style={styles.deleteCancelText}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                style={[
+                  styles.deleteConfirmBtn,
+                  { backgroundColor: "#1a1a1a" },
+                  rotateInviteMutation.isPending && { opacity: 0.6 },
+                ]}
+                onPress={() => rotateInviteMutation.mutate()}
+                disabled={rotateInviteMutation.isPending}
+                testID="rotate-invite-confirm"
+              >
+                <Text style={styles.deleteConfirmText}>
+                  {rotateInviteMutation.isPending ? "Rotating\u2026" : "Rotate"}
+                </Text>
+              </Pressable>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* Remove Member Confirm Modal */}
+      <Modal
+        visible={!!memberPendingRemoval}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setMemberPendingRemoval(null)}
+      >
+        <Pressable style={styles.settingsOverlay} onPress={() => setMemberPendingRemoval(null)}>
+          <Pressable style={styles.deleteConfirmCard} onPress={() => {}}>
+            <Text style={styles.deleteConfirmTitle}>Remove {memberPendingRemoval?.name}?</Text>
+            <Text style={styles.deleteConfirmBody}>
+              They'll lose access to this board immediately. Their suggestions and contributions stay.
+            </Text>
+            <View style={styles.deleteConfirmActions}>
+              <Pressable
+                style={styles.deleteCancelBtn}
+                onPress={() => setMemberPendingRemoval(null)}
+                disabled={removeMemberMutation.isPending}
+                testID="member-remove-cancel"
+              >
+                <Text style={styles.deleteCancelText}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.deleteConfirmBtn, removeMemberMutation.isPending && { opacity: 0.6 }]}
+                onPress={() => {
+                  if (memberPendingRemoval) removeMemberMutation.mutate(memberPendingRemoval.userId);
+                }}
+                disabled={removeMemberMutation.isPending}
+                testID="member-remove-confirm"
+              >
+                <Text style={styles.deleteConfirmText}>
+                  {removeMemberMutation.isPending ? "Removing\u2026" : "Remove"}
+                </Text>
+              </Pressable>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* Leave Board Confirm Modal */}
+      <Modal
+        visible={showLeaveConfirm}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowLeaveConfirm(false)}
+      >
+        <Pressable style={styles.settingsOverlay} onPress={() => setShowLeaveConfirm(false)}>
+          <Pressable style={styles.deleteConfirmCard} onPress={() => {}}>
+            <Text style={styles.deleteConfirmTitle}>Leave "{board.name}"?</Text>
+            <Text style={styles.deleteConfirmBody}>
+              You'll lose access to this board. You can rejoin only with a new invite from the creator.
+            </Text>
+            <View style={styles.deleteConfirmActions}>
+              <Pressable
+                style={styles.deleteCancelBtn}
+                onPress={() => setShowLeaveConfirm(false)}
+                disabled={leaveBoardMutation.isPending}
+                testID="leave-board-cancel"
+              >
+                <Text style={styles.deleteCancelText}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.deleteConfirmBtn, leaveBoardMutation.isPending && { opacity: 0.6 }]}
+                onPress={() => leaveBoardMutation.mutate()}
+                disabled={leaveBoardMutation.isPending}
+                testID="leave-board-confirm"
+              >
+                <Text style={styles.deleteConfirmText}>
+                  {leaveBoardMutation.isPending ? "Leaving\u2026" : "Leave"}
                 </Text>
               </Pressable>
             </View>
@@ -3652,6 +3902,9 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: "#888888",
   },
+  metaTextTappable: {
+    color: "#534AB7",
+  },
   metaDot: {
     width: 3,
     height: 3,
@@ -4386,6 +4639,104 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   deleteConfirmText: {
+    fontFamily: "DMSans_600SemiBold",
+    fontSize: 15,
+    color: "#FFFFFF",
+  },
+  membersSheet: {
+    backgroundColor: "#FFFFFF",
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 32,
+    marginTop: "auto",
+    width: "100%",
+  },
+  membersHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F0F0F0",
+    marginBottom: 12,
+  },
+  membersTitle: {
+    fontFamily: "DMSans_600SemiBold",
+    fontSize: 18,
+    color: "#1a1a1a",
+  },
+  membersDoneText: {
+    fontFamily: "DMSans_600SemiBold",
+    fontSize: 15,
+    color: "#534AB7",
+  },
+  rotateInviteRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#F7F6F1",
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 12,
+    gap: 12,
+  },
+  rotateInviteIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "#EEEDFE",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  rotateInviteTitle: {
+    fontFamily: "DMSans_600SemiBold",
+    fontSize: 15,
+    color: "#1a1a1a",
+  },
+  rotateInviteSubtitle: {
+    fontFamily: "DMSans_400Regular",
+    fontSize: 13,
+    color: "#888888",
+    marginTop: 2,
+  },
+  memberRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 10,
+  },
+  memberName: {
+    fontFamily: "DMSans_600SemiBold",
+    fontSize: 15,
+    color: "#1a1a1a",
+  },
+  memberRoleBadge: {
+    fontFamily: "DMSans_400Regular",
+    fontSize: 12,
+    color: "#888888",
+    marginTop: 2,
+  },
+  memberRemoveBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#EBEBEB",
+  },
+  memberRemoveText: {
+    fontFamily: "DMSans_600SemiBold",
+    fontSize: 13,
+    color: "#DC2626",
+  },
+  leaveBoardBtn: {
+    marginTop: 16,
+    backgroundColor: "#DC2626",
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: "center",
+  },
+  leaveBoardText: {
     fontFamily: "DMSans_600SemiBold",
     fontSize: 15,
     color: "#FFFFFF",
