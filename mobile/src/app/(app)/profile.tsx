@@ -1,8 +1,9 @@
-import { View, Text, Pressable, StyleSheet } from "react-native";
+import { useState } from "react";
+import { View, Text, Pressable, StyleSheet, Modal, ActivityIndicator } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useSession, useInvalidateSession } from "@/lib/auth/use-session";
 import { authClient } from "@/lib/auth/auth-client";
-import { LogOut } from "lucide-react-native";
+import { LogOut, Trash2 } from "lucide-react-native";
 
 function getInitials(name: string): string {
   return name.split(" ").map((n) => n[0]).join("").toUpperCase().slice(0, 2);
@@ -12,10 +13,31 @@ export default function ProfileScreen() {
   const { data: session } = useSession();
   const invalidateSession = useInvalidateSession();
   const user = session?.user;
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const handleSignOut = async () => {
     await authClient.signOut();
     await invalidateSession();
+  };
+
+  const handleDeleteAccount = async () => {
+    setIsDeleting(true);
+    setDeleteError(null);
+    try {
+      const result = await authClient.deleteUser();
+      if (result.error) {
+        setDeleteError(result.error.message ?? "Couldn't delete account. Please try again.");
+        setIsDeleting(false);
+        return;
+      }
+      await invalidateSession();
+      setShowDeleteModal(false);
+    } catch (e) {
+      setDeleteError("Couldn't delete account. Please try again.");
+      setIsDeleting(false);
+    }
   };
 
   if (!user) return null;
@@ -41,7 +63,64 @@ export default function ProfileScreen() {
           <LogOut size={18} color="#E53E3E" />
           <Text style={styles.signOutText}>Sign out</Text>
         </Pressable>
+        <Pressable
+          style={({ pressed }) => [styles.deleteAccountButton, pressed && { opacity: 0.8 }]}
+          onPress={() => {
+            setDeleteError(null);
+            setShowDeleteModal(true);
+          }}
+          testID="delete-account-button"
+        >
+          <Trash2 size={18} color="#FFFFFF" />
+          <Text style={styles.deleteAccountText}>Delete account</Text>
+        </Pressable>
       </View>
+
+      <Modal
+        visible={showDeleteModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => !isDeleting && setShowDeleteModal(false)}
+      >
+        <Pressable
+          style={styles.modalOverlay}
+          onPress={() => !isDeleting && setShowDeleteModal(false)}
+        >
+          <Pressable style={styles.modalCard} onPress={() => {}}>
+            <Text style={styles.modalTitle}>Delete account?</Text>
+            <Text style={styles.modalBody}>
+              This permanently deletes your account, the boards you created, and your contributions to other boards. This cannot be undone.
+            </Text>
+            {deleteError ? <Text style={styles.modalError}>{deleteError}</Text> : null}
+            <View style={styles.modalButtonRow}>
+              <Pressable
+                style={({ pressed }) => [styles.modalCancelButton, pressed && { opacity: 0.7 }]}
+                onPress={() => setShowDeleteModal(false)}
+                disabled={isDeleting}
+                testID="delete-account-cancel"
+              >
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                style={({ pressed }) => [
+                  styles.modalConfirmButton,
+                  pressed && { opacity: 0.8 },
+                  isDeleting && { opacity: 0.6 },
+                ]}
+                onPress={handleDeleteAccount}
+                disabled={isDeleting}
+                testID="delete-account-confirm"
+              >
+                {isDeleting ? (
+                  <ActivityIndicator color="#FFFFFF" size="small" />
+                ) : (
+                  <Text style={styles.modalConfirmText}>Delete account</Text>
+                )}
+              </Pressable>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -58,4 +137,16 @@ const styles = StyleSheet.create({
   userEmail: { fontFamily: "DMSans_400Regular", fontSize: 15, color: "#888888" },
   signOutButton: { flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: "#EBEBEB", borderRadius: 12, paddingHorizontal: 20, paddingVertical: 16 },
   signOutText: { fontFamily: "DMSans_600SemiBold", fontSize: 15, color: "#E53E3E" },
+  deleteAccountButton: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10, backgroundColor: "#DC2626", borderRadius: 12, paddingHorizontal: 20, paddingVertical: 16 },
+  deleteAccountText: { fontFamily: "DMSans_600SemiBold", fontSize: 15, color: "#FFFFFF" },
+  modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.45)", alignItems: "center", justifyContent: "center", paddingHorizontal: 24 },
+  modalCard: { width: "100%", maxWidth: 380, backgroundColor: "#FFFFFF", borderRadius: 16, padding: 24, gap: 12 },
+  modalTitle: { fontFamily: "DMSans_600SemiBold", fontSize: 19, color: "#1a1a1a" },
+  modalBody: { fontFamily: "DMSans_400Regular", fontSize: 15, lineHeight: 21, color: "#555555" },
+  modalError: { fontFamily: "DMSans_400Regular", fontSize: 14, color: "#DC2626", marginTop: 4 },
+  modalButtonRow: { flexDirection: "row", gap: 12, marginTop: 12 },
+  modalCancelButton: { flex: 1, paddingVertical: 14, borderRadius: 12, borderWidth: 1, borderColor: "#EBEBEB", alignItems: "center" },
+  modalCancelText: { fontFamily: "DMSans_600SemiBold", fontSize: 15, color: "#1a1a1a" },
+  modalConfirmButton: { flex: 1, paddingVertical: 14, borderRadius: 12, backgroundColor: "#DC2626", alignItems: "center" },
+  modalConfirmText: { fontFamily: "DMSans_600SemiBold", fontSize: 15, color: "#FFFFFF" },
 });
