@@ -142,6 +142,103 @@ These aren't bugs — they're items where a sanity check before EAS builds saves
 9. `8072842` — Gate 3A: Delete Account UI on Profile screen
 10. `867cbaa` — Gate 3B: Members modal with leave / remove / rotate
 
+---
+
+## 2026-05-24 (continued) — Gate 4 attempted, build pipeline working, app crashes at boot
+
+### What got built
+
+**EAS Build setup complete** (commits `6053696`, `38bfabd`, `db09a66`, `2bd9d03`):
+- `mobile/app.json`: name `vibecode` → `Plannr`, slug → `plannr`, added `ios.bundleIdentifier: "app.joinplannr.plannr"` and `android.package` to match. scheme kept as `vibecode` because changing it requires updating `auth-client.ts` deep-link handling (deferred).
+- `mobile/eas.json` (new): development / preview / production build profiles. Preview profile is internal-distribution.
+- `bunx eas-cli init --force` linked Expo project, added `extra.eas.projectId` and `owner: "plannr"` to app.json.
+- Apple Developer credentials registered with EAS: distribution certificate, provisioning profile, Anthony's iPhone UDID `00008101-00146DD03441001E` provisioned.
+- Bundle ID `app.joinplannr.plannr` registered in App Store Connect; app created.
+
+### Build pipeline issues debugged
+
+1. **Build 7e7753b1** failed at "Install pods" with `[!] Unable to find a specification for RCT-Folly (= 2022.05.16.00) depended upon by react-native-ios-context-menu`. Root cause: `react-native-ios-context-menu` (and 8 other Vibecode-template native packages) declared in `package.json` but never imported in `src/`, and pinning an old Folly version RN 0.81 doesn't ship.
+2. **First fix attempt** (`38bfabd`) — removed all 9 unused direct deps. Build 7e7753b1 (rebuild) still failed identically because `zeego@3.0.6` (which we kept) lists `react-native-ios-context-menu`, `react-native-ios-utilities`, `@react-native-menu/menu` as **peerDependencies**, so bun reinstalled them.
+3. **Second fix** (`db09a66`) — removed `zeego` (zero imports in `src/`). Build **5beabad1** succeeded.
+
+### The actual blocker — app crashes at boot
+
+Anthony installed build 5beabad1 on his iPhone via the EAS direct-install link (NOT TestFlight, but uses the same ad-hoc distribution mechanism). Steps that did work:
+- Safari → install link → tap Install → app icon on home screen
+- iOS prompt "Plannr requires developer mode to run" → Settings → Privacy & Security → Developer Mode → ON → phone restart → confirm
+
+But: **tapping the app icon shows a white screen for ~1 second, then exits back to home.** Same `wrapNativeSuper`-style boot crash the 2026-05-17 session saw in Expo Go. Confirmed NOT Expo-Go-specific.
+
+**Attempted fix** (`2bd9d03`) — speculative: removed `withVibecodeMetro` wrap from `metro.config.js`. Hypothesis was that the SDK wrapper injects a `.web.js` fetch polyfill into `getModulesRunBeforeMainModule` unconditionally, which Hermes can't execute on iOS. Removed the wrap, rebuilt — build **cc635181** succeeded but **the app still crashes the same way.** Hypothesis was wrong.
+
+### What we know definitively now
+
+- The crash is NOT Expo-Go-specific (it's in a real dev build too).
+- The crash is NOT caused by `withVibecodeMetro` (still crashes after removing it).
+- The crash is at startup, before any React tree mounts.
+- Crash mode: app launches → white screen → exits to home. No error message visible to the user.
+
+### Remaining suspects (in order; from 2026-05-17 notes)
+
+1. **`react-native-css-interop@0.1.22` override** — still pinned in `mobile/package.json` `overrides`. NativeWind 4.1+ vendors css-interop internally; the override may install a stale separate copy that conflicts at runtime.
+2. **`better-auth` + `@better-auth/expo` 1.6.0** — custom Error subclasses on Hermes + React 19.1 can hit `wrapNativeSuper`. Imported at boot via `_layout.tsx` → `useSession` → `auth-client`.
+3. **`react-native-keyboard-controller@1.18.5`** — native module imported by root `_layout.tsx`.
+4. **`@vibecodeapp/sdk` polyfills still loaded somewhere** — even after unwiring the metro wrapper, the package's polyfills might be auto-imported via the dist/index.js side-effect path.
+
+### How to resume — read the crash log first
+
+Don't guess at suspects in another rebuild loop. Get the actual native iOS crash log:
+
+1. Plug Anthony's iPhone into the Mac via USB.
+2. On Mac, open **Console.app** (Cmd-Space → "Console").
+3. In Console's sidebar, click his iPhone under "Devices".
+4. Click **"Start streaming"** at the top.
+5. On the iPhone, tap the Plannr icon → crash happens.
+6. In Console, immediately stop streaming and search for `Plannr` or `plannr` in the search bar.
+7. The crash log includes the failing library / function. That tells us EXACTLY which suspect (or new culprit) is the boot blocker.
+
+Alternative: in Xcode → Window → Devices and Simulators → his iPhone → "View Device Logs" tab. Crash reports for Plannr appear here.
+
+Once we know the culprit, the fix is 1-3 lines of code (e.g., remove an import, downgrade a version, swap a package).
+
+### Build cycle reference
+
+EAS Build cycle is 12-15 min per attempt. Use it sparingly — read a crash log first.
+
+```
+bunx eas-cli build --profile preview --platform ios --non-interactive
+```
+
+Install URL pattern: `https://expo.dev/accounts/plannr/projects/plannr/builds/<build-id>`. Open on iPhone in Safari, tap Install. App replaces existing in-place.
+
+### Today's full commit log
+
+1. `058652f` — Add SHIP-TO-PHONE-BRIEFING.md
+2. `e0b1efd` — Prep backend for Railway + Postgres
+3. `a97fc0b` — Guard SQLite PRAGMA init on Postgres
+4. `e127535` — Better Auth Prisma adapter sqlite → postgresql
+5. `297a2eb` — SESSION-NOTES Gate 1 done
+6. `11af05b` — Gate 2: mobile .env.production → Railway
+7. `04a1032` — Gate 3A: enable account deletion with cascade semantics
+8. `d5d61a0` — Skip session-freshness on delete-user
+9. `8072842` — Gate 3A: Delete Account UI on Profile screen
+10. `867cbaa` — Gate 3B: Members modal with leave / remove / rotate
+11. `f28d9de` — SESSION-NOTES Gates 2, 3A, 3B done
+12. `6053696` — Gate 4: app.json + eas.json (Plannr identity)
+13. `38bfabd` — Drop 9 unused Vibecode-template native packages
+14. `db09a66` — Drop zeego (peer-dep chain that re-pulled failing packages)
+15. `2bd9d03` — Unwire withVibecodeMetro (DID NOT FIX boot crash)
+
+### State of the world after today
+
+- ✅ Backend live: `https://plannr-production-9a90.up.railway.app`
+- ✅ Mobile prod config points at Railway
+- ✅ Delete account UI + cascade-on-delete schema
+- ✅ Members modal (leave / remove / rotate)
+- ✅ EAS Build pipeline configured top to bottom
+- ✅ Latest build installs on Anthony's phone via official mechanism
+- ❌ App crashes at boot — actual culprit unknown until we read Console.app logs
+
 ## 2026-05-17 — Privacy audit and fixes
 
 ### What we did
