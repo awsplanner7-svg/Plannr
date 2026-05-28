@@ -9,7 +9,10 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "app.joinplannr.plannr"
+      "bundleIdentifier": "app.joinplannr.plannr",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "edgeToEdgeEnabled": true,
@@ -36,6 +39,9 @@
         "projectId": "169c416e-4450-4b69-bbdb-6f5117a8e32e"
       }
     },
-    "owner": "plannr"
+    "owner": "plannr",
+    "updates": {
+      "enabled": false
+    }
   }
 }
