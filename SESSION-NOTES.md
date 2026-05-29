@@ -1,5 +1,72 @@
 # Plannr — Session Notes
 
+## 2026-05-27 / 2026-05-28 — Boot crash hunt (Gate 4 still blocked)
+
+### TL;DR for next session
+
+The app installs on Anthony's iPhone but **crashes/render-errors at launch**. We made real progress over two days and fixed the *native* crash, but a **JavaScript render error remains unsolved**. Pick up at "NEXT STEP" below — don't re-walk the whole path.
+
+### What got FIXED (committed, real)
+
+1. **`react-native-worklets@0.5.1` installed** (commit `a1d54a1`) — this was the *native* boot crash. Reanimated 4 requires worklets as a native peer dep; the SDK 54 upgrade switched the babel plugin to `react-native-worklets/plugin` but never installed the package. Without it, the app died at boot with `EXC_CRASH/SIGABRT` on `com.meta.react.turbomodulemanager.queue` (an Obj-C exception rethrown from `ObjCTurboModule::performVoidMethodInvocation`). Found via `npx expo-doctor` ("Missing peer dependency: react-native-worklets... may crash outside of Expo Go").
+2. **Version alignment to SDK 54** (commit `a1d54a1`): reanimated 4.3.1→4.1.7, nativewind 4.1.23→4.2.4 (+ css-interop 0.1.22→0.2.4, which adds React 19 support), expo-router 6.0.23→6.0.24, plus expo-file-system/-font/-updates patch bumps via `expo install --fix`. Removed the redundant `react-native-css-interop` override.
+3. **expo-updates disabled** (commit `6473846`, earlier): `app.json` `updates.enabled:false`. Its error-recovery queue was crashing; not needed for dev/TestFlight.
+4. **9 unused Vibecode native packages + zeego removed** (commits `38bfabd`, `db09a66`): they broke `pod install` (RCT-Folly version conflict). Pods now install clean.
+5. **`withVibecodeMetro` unwired** from metro.config.js (commit `2bd9d03`) — turned out NOT to be the crash, but the removal is harmless (it injected a `.web.js` polyfill into the native bundle).
+
+### The REMAINING bug (unsolved)
+
+After all the above, in a **local dev build** (see setup below) the app gets past the native layer and Metro loads the JS, but throws a **JS render error**:
+
+```
+Error: Element type is invalid: expected a string ... but got: undefined.
+Check the render method of `SceneView`.
+  RootLayoutNav (src/app/_layout.tsx:34)  ← the <Stack> in the root layout
+```
+
+Component stack (from Metro): `css-interop wrap-jsx → BaseRoute (expo-router useScreens.js) → SceneView`. So **expo-router's BaseRoute is rendering an undefined component** for some route.
+
+### What we RULED OUT (don't re-test these)
+
+- NOT a screen file's missing `export default` — every screen file has one (grep-verified).
+- NOT `Stack` / `Stack.Protected` / `Stack.Screen` — all are `function` at runtime (logged via diagnostic).
+- NOT `Tabs` or the lucide icons (`Home/Clock/Bell/User`) — all exported (`Home` is aliased to `house.js` in lucide 0.468).
+- NOT the css-interop *override* (only one copy installed; removing the override was a no-op).
+- NOT fixed by: expo-updates disable, worklets, nativewind 4.2.4 bump, expo-router 6.0.24, board/[id] file→dir move, stubbing all screens, stripping the layouts. The render error is extremely robust.
+- A diagnostic in expo-router's `fromImport` (sync path, "RT2") logged ONE route with an *empty* name and all components defined — meaning **most routes load LAZILY** and the crash is in a lazy route's resolution, which the sync-path probe doesn't see.
+
+### NEXT STEP (start here)
+
+Find which lazy-loaded route resolves to `undefined`. A probe is **already in place** in `mobile/node_modules/expo-router/build/useScreens.js` (added this session, but node_modules isn't committed so it may be gone after a reinstall):
+- In `fromImport(...)`, just before `return { default: component.default }`, there's: `console.log('[RT3 fromImport]', value.contextKey, '| default:', typeof component.default);`
+- If it's missing (reinstall wiped it), re-add it.
+
+Then:
+1. Start the local dev build (see setup below).
+2. Reload the app on the phone.
+3. Read Metro logs for `[RT3 fromImport]` lines. The one printing `default: undefined` names the exact route file (`value.contextKey`) that's broken. THAT file is the culprit — inspect its imports for a circular dependency or a bad re-export.
+
+Alternative if RT3 doesn't reveal it: the undefined element may be an expo-router *internal* (`Route` / `Suspense` / `SuspenseFallback` in BaseRoute's JSX) rather than the screen — extend the probe to log `typeof Route_1.Route` and `typeof SuspenseFallback_1.SuspenseFallback` too (a "RT2" probe at line ~184 did this for the sync route and they were defined, but verify for the lazy path).
+
+### Local dev build setup (this is the fast debug loop — use it, not cloud builds)
+
+- Xcode 26.5 is installed; `xcode-select` is now pointed at it (`/Applications/Xcode.app/Contents/Developer`).
+- iPhone connits via USB. Its coredevice UUID: `A2B93772-D0DA-5AAF-BBD8-D13882406CB2`; hardware UDID `00008101-00146DD03441001E`.
+- The `ios/` native project exists (via `expo prebuild`, gitignored). CocoaPods is installed via Homebrew. `pod install` succeeds.
+- `bunx expo run:ios --device <UUID>` FAILS at the device-connect step ("Unexpected devicectl JSON version" — Expo CLI can't parse Xcode 26.5's device list). **Workaround that worked:** open `mobile/ios/Plannr.xcworkspace` in Xcode, set Signing team to "ANTHONY W SULLIVAN (Individual)", select the iPhone, hit ▶ Run. That installs + launches the dev client.
+- Start Metro separately: `cd mobile && bunx expo start --dev-client --clear`. On the phone's dev-client screen, enter the Mac's LAN URL manually: `http://192.168.1.17:8081` (or `192.168.1.38:8081`). Phone + Mac must be same WiFi.
+- **Fast Refresh is unreliable when a layout throws** — after each code change, force-quit Plannr on the phone and reopen (don't trust hot reload). And don't trust a grep for the error immediately after "Bundled" — the device renders a few seconds later; wait ~12s.
+
+### Unrelated: Railway is emailing "build failed" on every push
+
+Every push to `main` triggers a Railway redeploy that fails because the service's **Root Directory got unset** (Railpack scans the repo root, finds no buildable app, bails). **The live backend is unaffected** — `curl https://plannr-production-9a90.up.railway.app/health` still returns `{"status":"ok"}` (the last good deploy keeps serving). To stop the email spam: Railway → Plannr service → Settings → Source → set **Root Directory = `backend`** and optionally **Watch Paths = `backend/**`**. Or just toggle Auto Deploy off. Anthony chose to ignore it for now.
+
+### How to resume
+
+1. Confirm backend up: `curl https://plannr-production-9a90.up.railway.app/health`.
+2. Start the local dev build (setup above), re-add the RT3 probe if gone, reload, read `[RT3 fromImport]` logs → find the route file whose `default` is `undefined`.
+3. Fix that file's import issue. Reload. If the app boots to the onboarding/sign-in screen → boot crash finally solved → then a fresh `eas build --profile preview` for TestFlight.
+
 ## 2026-05-24 — Gate 1: Backend deployed to Railway with Postgres
 
 ### What we did
